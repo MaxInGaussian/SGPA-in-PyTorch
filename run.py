@@ -28,27 +28,29 @@ from torch.autograd import Variable
 
 from sgpa import SGPA
 
-bandwidth = 0.5
+n_basis = 50
 learning_rate = 1e-1
 
 module_name = input('Enter task location: ')
 module = importlib.import_module(module_name)
+(N, D_in, D_out), run = module.load_problem()
 
-N, D_in, H, D_out = 64, 1, 50, 30, 1
+hidden_layers = [50]
+layer_sizes = [D_in]+hidden_layers+[D_out]
 
 model = to.nn.Sequential()
-for 
-model.add_module(Linear(D_in, H_1))
-model.add_module(Linear(D_in, H_1))
-model.add_module(Linear(D_in, H_1))
-            SGPA(H_1, H_2),
-            to.nn.Linear(H_2, D_out)
+for l, (n_in, n_out) in enumerate(zip(layer_sizes[:-1], layer_sizes[1:])):
+    if(l == 0):
+        model.add_module('linear_l'+str(l), Linear(n_in, n_out))
+        continue
+    model.add_module('sgpa_l'+str(l), SGPA(n_in, n_basis))
+    model.add_module('linear_l'+str(l), Linear(n_basis, n_out))
 
 loss_fn = to.nn.MSELoss(size_average=False)
 
 optimizer = to.optim.Adam(model.parameters(), lr=learning_rate)
 
-def train_step(t):
+def train_step(t, x, y, x_val=None, y_val=None):
     y_pred = model(x)
     loss = loss_fn(y_pred, y)
     print(t, loss.data[0])
@@ -56,4 +58,4 @@ def train_step(t):
     loss.backward()
     optimizer.step()
 
-module.load_problem(model, train_step)
+run(model, train_step)

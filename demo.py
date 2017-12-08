@@ -1,3 +1,25 @@
+# MIT License
+# 
+# Copyright (c) 2017 Max W. Y. Lam
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import numpy as np
 import torch as to
 from torch.autograd import Variable
@@ -5,26 +27,38 @@ from matplotlib import cm
 from matplotlib import pylab
 from matplotlib.animation import FuncAnimation
 from sklearn.neighbors import KernelDensity
-from Modules import SGPA
+
+from sgpa import SGPA
 
 bandwidth = 0.5
+learning_rate = 1e-1
 
-# N is batch size; D_in is input dimension;
-# H is hidden dimension; D_out is output dimension.
-N, D_in, H, D_out = 64, 1, 30, 10
+N, D_in, H_1, H_2, D_out = 64, 1, 50, 30, 1
 
-# Create random Tensors to hold inputs and outputs, and wrap them in Variables.
-x = Variable(to.randn(N, D_in)*5)
-y = Variable(to.randn(N, 1)+5*to.sin(x).data, requires_grad=False)
+x = Variable(to.randn(N, D_in)*3)
+y = Variable(to.randn(N, 1)*.5+5*to.sin(x).data, requires_grad=False)
 
-# Use the nn package to define our model and loss function.
 model = to.nn.Sequential(
-          to.nn.Linear(D_in, H),
-          SGPA(H, H),
-          to.nn.Linear(H, 1),
+            to.nn.Linear(D_in, H_1),
+            SGPA(H_1, H_2),
+            to.nn.Linear(H_2, D_out),
         )
 
-def animate(fig):
+loss_fn = to.nn.MSELoss(size_average=False)
+
+optimizer = to.optim.Adam(model.parameters(), lr=learning_rate)
+fig = pylab.figure()
+fig.set_tight_layout(True)
+
+def animate(t):
+    
+    y_pred = model(x)
+    loss = loss_fn(y_pred, y)
+    print(t, loss.data[0])
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    
     fig.clf()
     ax = fig.add_subplot(111)
     pts = 300
@@ -39,22 +73,24 @@ def animate(fig):
     for e in errors:
         ax.fill_between(x_plot.data.numpy().ravel(), y_mu-e*y_std, y_mu+e*y_std,
                         alpha=((3-e)/5.5)**1.7, facecolor='b', linewidth=1e-3)
-    # ax.plot(Xs[:, 0], mu, alpha=0.8, c='black')
-    # ax.errorbar(self.model.Xt[:, 0],
-    #     self.model.yt.ravel(), fmt='r.', markersize=5, alpha=0.6)
-    # ax.errorbar(self.model.Xs[:, 0],
-    #     self.model.ys.ravel(), fmt='g.', markersize=5, alpha=0.6)
-    # ax.set_ylim([y.min(), y.max()])
-    # ax.set_xlim([-0.1, 1.1])
-    pylab.pause(0.1)
+    pylab.pause(.1)
+    return ax
 
-def kde_animate(fig):
+def kde_animate(t):
+    
+    y_pred = model(x)
+    loss = loss_fn(y_pred, y)
+    print(t, loss.data[0])
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    
     fig.clf()
     ax = fig.add_subplot(111)
     pts = 300
     pylab.plot(x.data.numpy().ravel(), y.data.numpy().ravel(), 'r.')
-    x_plot = Variable(to.linspace(to.min(x.data), to.max(x.data), pts)[:, None])
-    y_plot = np.linspace(to.min(y.data)-.5, to.max(y.data)+.5, pts)[:, None]
+    x_plot = Variable(to.linspace(to.min(x.data)-1., to.max(x.data)+1., pts)[:, None])
+    y_plot = np.linspace(to.min(y.data)-1., to.max(y.data)+1., pts)[:, None]
     y_pred = to.Tensor(0, 1)
     for _ in range(100):
         y_pred = to.cat([y_pred, model(x_plot).data], 1)
@@ -67,41 +103,17 @@ def kde_animate(fig):
         log_pdf = kde_skl.score_samples(y_plot)
         grid.append(np.exp(log_pdf)[:, None])
     grid = np.asarray(grid).reshape((pts, pts)).T
-    pylab.imshow(grid, extent=(
+    ax.imshow(grid, extent=(
             x_plot.data.numpy().min(), x_plot.data.numpy().max(),
             y_plot.max(), y_plot.min()),
         interpolation='bicubic', cmap=cm.Blues)
     pylab.pause(.5)
+    return ax
 
-# The nn package also contains definitions of popular loss functions; in this
-# case we will use Mean Squared Error (MSE) as our loss function.
-loss_fn = to.nn.MSELoss(size_average=False)
+anim = FuncAnimation(fig, animate, frames=np.arange(0, 100), interval=300)
+anim.save('demo_1d_reg/demo_1d_reg.gif', writer='imagemagick')
 
-# Use the optim package to define an Optimizer that will update the weights of
-# the model for us. Here we will use Adam; the optim package contains many other
-# optimization algoriths. The first argument to the Adam constructor tells the
-# optimizer which Variables it should update.
-learning_rate = 1e-1
-optimizer = to.optim.Adam(model.parameters(), lr=learning_rate)
-fig = pylab.figure()
-fig.set_tight_layout(True)
-pylab.show()
-for t in range(100):
-    # Forward pass: compute predicted y by passing x to the model.
-    y_pred = model(x)
-    
-    # Compute and print loss.
-    loss = loss_fn(y_pred, y)
-    print(t, loss.data[0])
-    
-    # Before the backward pass, use the optimizer object to zero all of the
-    # gradients for the variables it will update (which are the learnable weights
-    # of the model)
-    optimizer.zero_grad()
-    
-    # Backward pass: compute gradient of the loss with respect to model parameters
-    loss.backward()
-    
-    # Calling the step function on an Optimizer makes an update to its parameters
-    optimizer.step()
-    kde_animate(fig)
+    fig.clf()
+anim = FuncAnimation(fig, kde_animate, frames=np.arange(0, 100), interval=300)
+anim.save('demo_1d_reg/demo_1d_reg_kde.gif', writer='imagemagick')
+

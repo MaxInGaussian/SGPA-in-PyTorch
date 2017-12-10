@@ -32,7 +32,7 @@ def load_problem():
     
     N, D_in, D_out = 64, 1, 1
     
-    def run(model, train_step):
+    def train(model, train_op):
         x = Variable(to.randn(N, 1)*3)
         y = Variable(to.randn(N, 1)*.5+5*to.sin(x).data, requires_grad=False)
         
@@ -40,7 +40,7 @@ def load_problem():
         fig.set_tight_layout(True)
         
         def ani(t):
-            train_step(t, x, y)
+            train_op(t, x, y)
             fig.clf()
             ax = fig.add_subplot(111)
             pts = 300
@@ -65,4 +65,4 @@ def load_problem():
         anim = FuncAnimation(fig, ani, frames=np.arange(0, 200), interval=300)
         anim.save('demo_1d_reg/demo_1d_reg.gif', writer='imagemagick')
     
-    return (N, D_in, D_out), run
+    return (N, D_in, D_out), train, None

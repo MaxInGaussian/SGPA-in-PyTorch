@@ -79,18 +79,18 @@ def load_problem():
     x_test = Variable(to.Tensor(X_test), requires_grad=False)
     y_test = Variable(to.Tensor(Y_test), requires_grad=False)
     
-    def train(model, train_op, num_epochs=1000, batch_size=20, **kwargs):
+    def train(locals, model, train_op, num_epochs=1000, batch_size=20):
         for ep in range(num_epochs):
             for it in range(N//batch_size):
                 X_batch = X_train[it*batch_size:(it+1)*batch_size]
                 Y_batch = Y_train[it*batch_size:(it+1)*batch_size]
                 x = Variable(to.Tensor(X_batch), requires_grad=False)
                 y = Variable(to.Tensor(Y_batch), requires_grad=False)
-                train_op(ep, x, y, kwargs)
-            train_op(ep, x_train, y_train, x_val=x_valid, y_val=y_valid)
+                train_op(locals, ep, x, y)
+            train_op(locals, ep, x_train, y_train, x_val=x_valid, y_val=y_valid)
     
     def eval(model, eval_op):
-        eval_op(x_test, y_test)
+        eval_op(x_test, y_test, {'task': 'reg', 'data': [Y_mean, Y_std]})
     
     return (N, D_in, D_out), train, eval
     

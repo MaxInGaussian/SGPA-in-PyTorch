@@ -28,7 +28,7 @@ from torch.autograd import Variable
 
 from sgpa import SGPA
 
-tol = 1e-5
+atol = 1e-5
 n_basis = 50
 learning_rate = 1e-1
 
@@ -52,21 +52,38 @@ loss_fn = to.nn.MSELoss(size_average=False)
 optimizer = to.optim.Adam(model.parameters(), lr=learning_rate)
 last_t, min_loss, best_state = 0, np.Infinity, None
 
-def train_op(t, x, y, x_val=None, y_val=None, locals=None):
+def train_op(locals, t, x, y, x_val=None, y_val=None):
     loss = loss_fn(model(x), y)
     if(x_val is None):
-        if(t > locals[last_t]):
-            print('Epoch %d: Train Loss = %.5f'%(t, loss))
+        if(t > locals['last_t']):
+            print('Epoch %d: Train Loss = %.5f'%(t, np.double(loss.data.numpy())))
     else:
-        loss_val = loss_fn(model(x_val), y_val)
-        if(loss_val < min_loss+tol):
-            min_loss = loss_val
-            best_state = model.state_dict()
-        print('=> Valid Loss = %.5f (Best = %.5f)'%(loss_val, min_loss))
+        loss_val = np.double(loss_fn(model(x_val), y_val).data.numpy())
+        if(loss_val < locals['min_loss']+locals['atol']):
+            locals['min_loss'] = loss_val
+            locals['best_state'] = model.state_dict()
+        print('Valid Loss = %.5f (Best = %.5f)'%(loss_val, locals['min_loss']))
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    last_t = t
+    locals['last_t'] = t
 
-train(model, train_op, locals())
+def eval_op(locals, x, y):
+    rmse = to.mean((model(x)-y)**2.)**.5
+    if(x_val is None):
+        if(t > locals['last_t']):
+            print('Epoch %d: Train Loss = %.5f'%(t, np.double(loss.data.numpy())))
+    else:
+        loss_val = np.double(loss_fn(model(x_val), y_val).data.numpy())
+        print(loss_val)
+        if(loss_val < locals['min_loss']+locals['atol']):
+            locals['min_loss'] = loss_val
+            locals['best_state'] = model.state_dict()
+        print('Valid Loss = %.5f (Best = %.5f)'%(loss_val, locals['min_loss']))
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    locals['last_t'] = t
+
+train(locals(), model, train_op)
 model.load_state_dict(best_state)

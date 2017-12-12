@@ -20,4 +20,5 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .SGPA import SGPA
+from .Modules import SGPA
+from .Samplers import TrainSampler, ValidationSampler, TestSampler

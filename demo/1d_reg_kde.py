@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 import numpy as np
-import torch as to
+import torch
 from torch.autograd import Variable
 from matplotlib import cm
 from matplotlib import pylab
@@ -34,8 +34,8 @@ def load_problem():
     N, D_in, D_out = 64, 1, 1
     
     def train(model, train_op):
-        x = Variable(to.randn(N, 1)*3)
-        y = Variable(to.randn(N, 1)*.5+5*to.sin(x).data, requires_grad=False)
+        x = Variable(torch.randn(N, 1)*3)
+        y = Variable(torch.randn(N, 1)*.5+5*torch.sin(x).data)
         
         fig = pylab.figure()
         fig.set_tight_layout(True)
@@ -46,14 +46,15 @@ def load_problem():
             ax = fig.add_subplot(111)
             pts = 300
             pylab.plot(x.data.numpy().ravel(), y.data.numpy().ravel(), 'r.')
-            x_plot = Variable(to.linspace(to.min(x.data)-1.,
-                to.max(x.data)+1., pts)[:, None])
-            y_plot = np.linspace(to.min(y.data)-1.,
-                to.max(y.data)+1., pts)[:, None]
-            y_pred = to.Tensor(0, 1)
+            x_plot = Variable(torch.linspace(torch.min(x.data)-1.,
+                torch.max(x.data)+1., pts)[:, None])
+            y_plot = np.linspace(torch.min(y.data)-1.,
+                torch.max(y.data)+1., pts)[:, None]
+            y_pred = torch.Tensor(0, 1)
             for _ in range(100):
-                y_pred = to.cat([y_pred, model(x_plot).data], 1)
-            y_mu, y_std = to.mean(y_pred, 1).numpy(), to.std(y_pred, 1).numpy()
+                y_pred = torch.cat([y_pred, model(x_plot).data], 1)
+            y_mu = torch.mean(y_pred, 1).numpy()
+            y_std = torch.std(y_pred, 1).numpy()
             kde_skl = KernelDensity(bandwidth=0.5)
             grid = []
             for i in range(pts):
@@ -65,8 +66,8 @@ def load_problem():
                     x_plot.data.numpy().min(), x_plot.data.numpy().max(),
                     y_plot.max(), y_plot.min()),
                 interpolation='bicubic', cmap=cm.Blues)
-            ax.set_ylim([to.min(y.data)-1, to.max(y.data)+1])
-            ax.set_xlim([to.min(x.data)-1, to.max(x.data)+1])
+            ax.set_ylim([torch.min(y.data)-1, torch.max(y.data)+1])
+            ax.set_xlim([torch.min(x.data)-1, torch.max(x.data)+1])
             pylab.pause(.5)
             return ax
     

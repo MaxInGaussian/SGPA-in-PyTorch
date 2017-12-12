@@ -21,9 +21,12 @@
 # SOFTWARE.
 
 import math
-import torch as to
-from torch.autograd import Variable, Function
+
+from torch import Tensor
+from torch.autograd import Variable
 from torch.nn import Parameter, Module
+
+from .Functions import SGPAFunction
 
 
 class SGPA(Module):
@@ -61,10 +64,10 @@ class SGPA(Module):
         super(SGPA, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.alpha_mean = Parameter(to.Tensor(2*in_features, out_features//2))
-        self.alpha_lgstd = Parameter(to.Tensor(2*in_features, out_features//2))
+        self.alpha_mean = Parameter(Tensor(2*in_features, out_features//2))
+        self.alpha_lgstd = Parameter(Tensor(2*in_features, out_features//2))
         if hyper_normal:
-            self.hyper_norm = Parameter(to.Tensor(2))
+            self.hyper_norm = Parameter(Tensor(2))
         else:
             self.register_parameter('hyper_norm', None)
         self.reset_parameters()
@@ -84,41 +87,3 @@ class SGPA(Module):
         return self.__class__.__name__ + '(' \
             + 'in_features=' + str(self.in_features) \
             + ', out_features=' + str(self.out_features) + ')'
-
-
-class SGPAFunction(Function):
-
-    @staticmethod
-    def forward(ctx, input, alpha_mean, alpha_lgstd, hyper_norm=None):
-        ctx.save_for_backward(input, alpha_mean, alpha_lgstd, hyper_norm)
-        alpha_std = to.exp(alpha_lgstd)
-        if hyper_norm is None:
-            epsilon = to.randn(*alpha_std.size())
-        else:
-            epsilon = to.rand(*alpha_std.size())
-            l1, l2 = math.tanh(hyper_norm[0])*.5+.5, math.exp(hyper_norm[1])
-            epsilon = to.sinh(epsilon*l2)/to.cosh(epsilon*l2)**l1/l2
-        A1, A2 = (alpha_mean+epsilon*alpha_lgstd).chunk(2)
-        Z1, Z2 = input.mm(A1), input.mm(A2)
-        S1, S2 = to.cos(Z1)+to.cos(Z2), to.sin(Z1)+to.sin(Z2)
-        output = to.cat([S1, S2], 1)/math.sqrt(alpha_std.size(0))
-        return output
-
-    # This function has only a single output, so it gets only one gradient
-    @staticmethod
-    def backward(ctx, grad_output):
-        input, alpha_mean, alpha_lgstd, hyper_norm = ctx.saved_variables
-        grad_input = grad_alpha_mean = grad_alpha_lgstd = grad_hyper_norm = None
-        
-        # These needs_input_grad checks are optional and there only to
-        # improve efficiency. If you want to make your code simpler, you can
-        # skip them. Returning gradients for inputs that don't require it is
-        # not an error.
-        # if ctx.needs_input_grad[0]:
-        #     grad_input = grad_output.mm(weight)
-        # if ctx.needs_input_grad[1]:
-        #     grad_alpha_mean = grad_output.t().mm(input)
-        # if bias is not None and ctx.needs_input_grad[2]:
-        #     grad_alpha_lgstd = grad_output.sum(0).squeeze(0)
-        
-        return grad_input, grad_alpha_mean, grad_alpha_lgstd, grad_hyper_norm

@@ -20,70 +20,143 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import argparse
 import importlib
 import numpy as np
-import torch as to
-from torch.nn import Linear
+
+import torch
+from torch.nn import Linear, ReLU, Dropout, BatchNorm1d
 from torch.autograd import Variable
+from torch.utils.data import DataLoader
 
-from sgpa import SGPA
+from contrib import SGPA, TrainSampler, ValidationSampler, TestSampler
 
-atol = 1e-5
-n_basis = 50
-learning_rate = 1e-1
 
-module_name = input('Enter task location: ')
-module = importlib.import_module(module_name)
-(N, D_in, D_out), train, eval = module.load_problem()
+# Training settings
+parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
+parser.add_argument('--hidden-layers', type=list, default=[100, 100], nargs='+',
+    metavar='L', help='depth and widths of hidden layers (default: [100, 50])')
+parser.add_argument('--n-basis', type=int, default=50, metavar='N',
+    help='number of spectral basis in SGPA (default: 50)')
+parser.add_argument('--train-samples', type=int, default=12, metavar='N',
+    help='number of samples in training SGPA (default: 12)')
+parser.add_argument('--test-samples', type=int, default=256, metavar='N',
+    help='number of samples in testing SGPA (default: 256)')
+parser.add_argument('--batch-size', type=int, default=10, metavar='N',
+    help='input batch size for training (default: 64)')
+parser.add_argument('--epochs', type=int, default=5000, metavar='N',
+    help='number of epochs to train (default: 5000)')
+parser.add_argument('--tolerance', type=int, default=20, metavar='N',
+    help='tolerance parameter for early stopping (default: 10)')
+parser.add_argument('--lr', type=float, default=1e-2, metavar='LR',
+    help='learning rate (default: 0.01)')
+parser.add_argument('--no-cuda', action='store_true', default=False,
+    help='disables CUDA training or not (default: False)')
+parser.add_argument('--seed', type=int, default=1, metavar='S',
+    help='random seed (default: 1)')
+parser.add_argument('--log-interval', type=int, default=10, metavar='N',
+    help='number of epochs to wait per log (default: 10)')
+args = parser.parse_args()
+args.cuda = not args.no_cuda and torch.cuda.is_available()
 
-hidden_layers = [50]
-layer_sizes = [D_in]+hidden_layers+[D_out]
+torch.manual_seed(args.seed)
+if args.cuda:
+    torch.cuda.manual_seed(args.seed)
 
-model = to.nn.Sequential()
+task_name = input('Enter Task Name: ')
+module = importlib.import_module(task_name)
+dataset = module.Dataset()
+
+train_sampler = TrainSampler(dataset)
+train_loader = DataLoader(dataset, args.batch_size, sampler=train_sampler)
+valid_sampler = ValidationSampler(train_sampler)
+valid_loader = DataLoader(dataset, len(valid_sampler), sampler=valid_sampler)
+test_sampler = TestSampler(valid_sampler)
+test_loader = DataLoader(dataset, len(test_sampler), sampler=test_sampler)
+
+if args.cuda:
+    model.cuda()
+
+D_in, D_out = dataset.data_tensor.size(1), dataset.target_tensor.size(1)
+layer_sizes = [D_in]+args.hidden_layers+[D_out]
+
+model = torch.nn.Sequential()
 for l, (n_in, n_out) in enumerate(zip(layer_sizes[:-1], layer_sizes[1:])):
-    if(l == 0):
-        model.add_module('linear_l'+str(l), Linear(n_in, n_out))
+    if(l < len(layer_sizes)-2):
+        model.add_module('linear_l'+str(l), Linear(n_in, args.n_basis))    
+        model.add_module('sgpa_l'+str(l), SGPA(args.n_basis, 100, False))
+        # model.add_module('linear_l'+str(l), Linear(n_in, n_out))
+        # model.add_module('dropout_l'+str(l), Dropout(0.2))
+        # model.add_module('relu_l'+str(l), ReLU())
         continue
-    model.add_module('sgpa_l'+str(l), SGPA(n_in, n_basis))
-    model.add_module('linear_l'+str(l), Linear(n_basis, n_out))
+    
+    model.add_module('linear_l'+str(l), Linear(n_in, n_out))
 
-loss_fn = to.nn.MSELoss(size_average=False)
+optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-optimizer = to.optim.Adam(model.parameters(), lr=learning_rate)
-last_t, min_loss, best_state = 0, np.Infinity, None
+train_dict = {'min_val_loss':np.Infinity, 'no_improve':0, 'best_state':None}
+loss_fn = torch.nn.MSELoss(size_average=True)
 
-def train_op(locals, t, x, y, x_val=None, y_val=None):
-    loss = loss_fn(model(x), y)
-    if(x_val is None):
-        if(t > locals['last_t']):
-            print('Epoch %d: Train Loss = %.5f'%(t, np.double(loss.data.numpy())))
-    else:
-        loss_val = np.double(loss_fn(model(x_val), y_val).data.numpy())
-        if(loss_val < locals['min_loss']+locals['atol']):
-            locals['min_loss'] = loss_val
-            locals['best_state'] = model.state_dict()
-        print('Valid Loss = %.5f (Best = %.5f)'%(loss_val, locals['min_loss']))
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-    locals['last_t'] = t
+def train(epoch, train_dict):
+    model.train()
+    train_loss = 0
+    for batch_idx, (data, target) in enumerate(train_loader):
+        if args.cuda:
+            data, target = data.cuda(), target.cuda()
+        data, target = Variable(data), Variable(target)
+        optimizer.zero_grad()
+        output = model(data)
+        for _ in range(args.train_samples-1):
+            output += model(data)
+        minibatch_train_loss = loss_fn(output/args.train_samples, target)
+        minibatch_train_loss.backward()
+        optimizer.step()
+        train_loss += minibatch_train_loss
+    train_loss /= len(train_loader)
+    if epoch % args.log_interval == 0:
+        valid_loss = 0
+        for batch_idx, (data, target) in enumerate(valid_loader):
+            if args.cuda:
+                data, target = data.cuda(), target.cuda()
+            data, target = Variable(data), Variable(target)
+            output = model(data)
+            for _ in range(args.test_samples-1):
+                output += model(data)
+            valid_loss += loss_fn(output/args.test_samples, target)
+        valid_loss /= len(valid_loader)
+        if(valid_loss.data[0] < train_dict['min_val_loss']):
+            train_dict['no_improve'] = 0
+            train_dict['min_val_loss'] = valid_loss.data[0]
+            train_dict['best_state'] = model.state_dict()
+        else:
+            train_dict['no_improve'] += 1
+        print('Train Epoch: {:05d} Train Loss: {:.5f} Valid Loss: {:.5f}'
+            ' Early Stop: {}/{}'.format(
+                epoch, train_loss.data[0], valid_loss.data[0],
+                    train_dict['no_improve'], args.tolerance))
 
-def eval_op(locals, x, y):
-    rmse = to.mean((model(x)-y)**2.)**.5
-    if(x_val is None):
-        if(t > locals['last_t']):
-            print('Epoch %d: Train Loss = %.5f'%(t, np.double(loss.data.numpy())))
-    else:
-        loss_val = np.double(loss_fn(model(x_val), y_val).data.numpy())
-        print(loss_val)
-        if(loss_val < locals['min_loss']+locals['atol']):
-            locals['min_loss'] = loss_val
-            locals['best_state'] = model.state_dict()
-        print('Valid Loss = %.5f (Best = %.5f)'%(loss_val, locals['min_loss']))
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-    locals['last_t'] = t
+def test():
+    # model.eval()
+    test_loss = 0
+    correct = 0
+    for data, target in test_loader:
+        if args.cuda:
+            data, target = data.cuda(), target.cuda()
+        data, target = Variable(data), Variable(target)
+        output = model(data)
+        for _ in range(args.test_samples-1):
+            output += model(data)
+        output = output.data*dataset.target_std/args.test_samples
+        target = target.data*dataset.target_std
+        test_loss += torch.sum((output-target)**2)/len(target)
+    test_loss /= len(test_loader)
+    print('\nTest set: Average Loss: {:.4f}'.format(test_loss))
 
-train(locals(), model, train_op)
-model.load_state_dict(best_state)
+
+for epoch in range(1, args.epochs + 1):
+    train(epoch, train_dict)
+    # test()
+    if(train_dict['no_improve'] >= args.tolerance):
+        break
+model.load_state_dict(train_dict['best_state'])
+test()

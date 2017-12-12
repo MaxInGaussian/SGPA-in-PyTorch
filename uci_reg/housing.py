@@ -21,10 +21,50 @@
 # SOFTWARE.
 
 import numpy as np
-import torch as to
-from torch.autograd import Variable
+import pandas as pd
 
-DATA_PATH = 'uci_reg/housing.data'
+import torch
+from torch.utils.data import TensorDataset
+
+
+class Dataset(TensorDataset):
+    """
+    Dataset wrapping data and target tensors.
+
+    Each sample will be retrieved by indexing both tensors along the first
+    dimension.
+
+    Arguments:
+        data_tensor (Tensor): contains sample data.
+        target_tensor (Tensor): contains sample targets (labels).
+    """
+
+    def __init__(self, standardize_data=True, standardize_target=True):
+        self.data_mu, self.data_std = None, None
+        self.target_mu, self.target_std = None, None
+        self.data_is_standardized, self.target_is_standardized = False, False
+        xy = pd.read_csv('uci_reg/housing.data', header=None, sep="\s+")
+        xy = xy.dropna(axis=0).as_matrix().astype(np.float32)
+        data_tensor = torch.from_numpy(xy[:, 0:-1])
+        target_tensor = torch.from_numpy(xy[:, [-1]])
+        super(Dataset, self).__init__(data_tensor, target_tensor)
+        self.__standardize__(standardize_data, standardize_target)
+
+    def __standardize__(self, standardize_data=True, standardize_target=True):
+        if self.data_mu is None and self.data_std is None:
+            self.data_mu = torch.mean(self.data_tensor, 0, keepdim=True)
+            self.data_std = torch.std(self.data_tensor, 0, keepdim=True)
+        if self.target_mu is None and self.target_std is None:
+            self.target_mu = torch.mean(self.target_tensor, 0, keepdim=True)
+            self.target_std = torch.std(self.target_tensor, 0, keepdim=True)
+        if standardize_data and not self.data_is_standardized:
+            self.data_tensor -= self.data_mu
+            self.data_tensor /= self.data_std
+            self.data_is_standardized = True
+        if standardize_target and not self.target_is_standardized:
+            self.target_tensor -= self.target_mu
+            self.target_tensor /= self.target_std
+            self.target_is_standardized = True
 
 def load_data(n_folds):
     import pandas as pd
@@ -53,16 +93,6 @@ def load_data(n_folds):
         X_test, Y_test = folds[test_fold]
         dataset.append([X_train, Y_train, X_valid, Y_valid, X_test, Y_test])
     return dataset
-
-def scaler(data_train, data_valid, data_test):
-    std = np.std(data_train, 0, keepdims=True)
-    std[std == 0] = 1
-    mean = np.mean(data_train, 0, keepdims=True)
-    train_standardized = (data_train - mean)/std
-    valid_standardized = (data_test - mean)/std
-    test_standardized = (data_test - mean)/std
-    mean, std = np.squeeze(mean, 0), np.squeeze(std, 0)
-    return train_standardized, valid_standardized, test_standardized, mean, std
     
 
 def load_problem():
@@ -72,20 +102,20 @@ def load_problem():
     (N, D_in), D_out = X_train.shape, Y_test.shape[-1]
     X_train, X_valid, X_test, X_mean, X_std = scaler(X_train, X_valid, X_test)
     Y_train, Y_valid, Y_test, Y_mean, Y_std = scaler(Y_train, Y_valid, Y_test)
-    x_train = Variable(to.Tensor(X_train), requires_grad=False)
-    y_train = Variable(to.Tensor(Y_train), requires_grad=False)
-    x_valid = Variable(to.Tensor(X_valid), requires_grad=False)
-    y_valid = Variable(to.Tensor(Y_valid), requires_grad=False)
-    x_test = Variable(to.Tensor(X_test), requires_grad=False)
-    y_test = Variable(to.Tensor(Y_test), requires_grad=False)
+    x_train = Variable(torch.Tensor(X_train), requires_grad=False)
+    y_train = Variable(torch.Tensor(Y_train), requires_grad=False)
+    x_valid = Variable(torch.Tensor(X_valid), requires_grad=False)
+    y_valid = Variable(torch.Tensor(Y_valid), requires_grad=False)
+    x_test = Variable(torch.Tensor(X_test), requires_grad=False)
+    y_test = Variable(torch.Tensor(Y_test), requires_grad=False)
     
     def train(locals, model, train_op, num_epochs=1000, batch_size=20):
         for ep in range(num_epochs):
             for it in range(N//batch_size):
                 X_batch = X_train[it*batch_size:(it+1)*batch_size]
                 Y_batch = Y_train[it*batch_size:(it+1)*batch_size]
-                x = Variable(to.Tensor(X_batch), requires_grad=False)
-                y = Variable(to.Tensor(Y_batch), requires_grad=False)
+                x = Variable(torch.Tensor(X_batch), requires_grad=False)
+                y = Variable(torch.Tensor(Y_batch), requires_grad=False)
                 train_op(locals, ep, x, y)
             train_op(locals, ep, x_train, y_train, x_val=x_valid, y_val=y_valid)
     
